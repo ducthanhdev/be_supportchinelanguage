@@ -11,27 +11,6 @@ function getPinyinText(chinese) {
     return getPinyin(chinese, { style: getPinyin.STYLE_TONE }).flat().join(' ');
 }
 
-// Hàm dịch nghĩa tiếng Việt bằng LibreTranslate (miễn phí)
-async function getVietnameseMeaning(chinese) {
-    try {
-        const res = await fetch('https://libretranslate.de/translate', {
-            method: 'POST',
-            body: JSON.stringify({
-                q: chinese,
-                source: 'zh',
-                target: 'vi',
-                format: 'text'
-            }),
-            headers: { 'Content-Type': 'application/json' }
-        });
-        const data = await res.json();
-        return data.translatedText || '';
-    } catch (e) {
-        console.log('LibreTranslate error:', e);
-        return '';
-    }
-}
-
 // Hàm tra Hán Việt từ object hanviet.data
 function getHanVietText(chinese) {
     if (!chinese) return '';
@@ -40,7 +19,7 @@ function getHanVietText(chinese) {
     return chinese.split('').map(char => hanviet.data[char] || char).join(' ');
 }
 
-// Thêm từ mới (tự động sinh pinyin, nghĩa tiếng Việt, Hán Việt nếu thiếu)
+// Thêm từ mới (chỉ lấy nghĩa tiếng Việt do người dùng nhập)
 exports.createWord = async (req, res) => {
     try {
         const { chinese, hanViet, pinyin, vietnamese } = req.body;
@@ -52,10 +31,7 @@ exports.createWord = async (req, res) => {
             finalPinyin = getPinyinText(chinese);
         }
         if (!finalVietnamese) {
-            finalVietnamese = await getVietnameseMeaning(chinese);
-            if (!finalVietnamese) {
-                finalVietnamese = 'Chưa có nghĩa';
-            }
+            finalVietnamese = 'Chưa có nghĩa';
         }
         if (!finalHanViet) {
             finalHanViet = getHanVietText(chinese);
@@ -101,7 +77,7 @@ exports.getWords = async (req, res) => {
     }
 };
 
-// Sửa từ
+// Sửa từ (chỉ lấy nghĩa tiếng Việt do người dùng nhập)
 exports.updateWord = async (req, res) => {
     try {
         const { chinese, hanViet, pinyin, vietnamese } = req.body;
@@ -116,10 +92,7 @@ exports.updateWord = async (req, res) => {
                 updateData.pinyin = getPinyinText(chinese);
             }
             if (typeof vietnamese === 'undefined') {
-                updateData.vietnamese = await getVietnameseMeaning(chinese);
-                if (!updateData.vietnamese) {
-                    updateData.vietnamese = 'Chưa có nghĩa';
-                }
+                updateData.vietnamese = 'Chưa có nghĩa';
             }
         }
         const word = await Word.findByIdAndUpdate(req.params.id, updateData, { new: true });
