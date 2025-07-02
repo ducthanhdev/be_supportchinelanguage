@@ -3,7 +3,6 @@ const pinyinLib = require('pinyin');
 const getPinyin = pinyinLib.default || pinyinLib;
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const hanviet = require('../libs/hanviet');
-const { translate } = require('@vitalets/google-translate-api');
 
 const LIBRE_API_KEY = process.env.LIBRE_API_KEY || '';
 
@@ -12,13 +11,23 @@ function getPinyinText(chinese) {
     return getPinyin(chinese, { style: getPinyin.STYLE_TONE }).flat().join(' ');
 }
 
-// Hàm dịch nghĩa tiếng Việt bằng google-translate-api (unofficial)
+// Hàm dịch nghĩa tiếng Việt bằng LibreTranslate (miễn phí)
 async function getVietnameseMeaning(chinese) {
     try {
-        const res = await translate(chinese, { from: 'zh-CN', to: 'vi' });
-        return res.text || '';
+        const res = await fetch('https://libretranslate.de/translate', {
+            method: 'POST',
+            body: JSON.stringify({
+                q: chinese,
+                source: 'zh',
+                target: 'vi',
+                format: 'text'
+            }),
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        return data.translatedText || '';
     } catch (e) {
-        console.log('Google unofficial translate error:', e);
+        console.log('LibreTranslate error:', e);
         return '';
     }
 }
