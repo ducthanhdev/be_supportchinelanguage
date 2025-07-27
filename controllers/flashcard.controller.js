@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Flashcard = require('../models/flashcard.model');
 const Word = require('../models/word.model');
 
@@ -41,24 +42,43 @@ exports.createFlashcard = async (req, res) => {
 // Lấy danh sách flashcards cần review
 exports.getFlashcardsForReview = async (req, res) => {
     try {
-        const { limit = 10, difficulty } = req.query;
+        const { limit = 10 } = req.query;
+        const userId = req.user.userId;
+        const parsedLimit = parseInt(limit, 10);
 
-        let query = {
-            userId: req.user.userId,
-            nextReview: { $lte: new Date() }
-        };
+        const totalCount = await Flashcard.countDocuments({ userId });
 
-        if (difficulty) {
-            query.difficulty = difficulty;
+        // Trường hợp không có thẻ nào
+        if (totalCount === 0) {
+            return res.json({ flashcards: [] });
         }
 
-        const flashcards = await Flashcard.find(query)
+        // Nếu tổng số thẻ ít hơn limit, lấy tất cả
+        if (totalCount < parsedLimit) {
+            const allFlashcards = await Flashcard.find({ userId });
+            return res.json({ flashcards: allFlashcards });
+        }
+
+        // Ưu tiên lấy các thẻ đến hạn review
+        let flashcards = await Flashcard.find({
+            userId: userId,
+            nextReview: { $lte: new Date() }
+        })
             .sort({ nextReview: 1 })
-            .limit(parseInt(limit));
+            .limit(parsedLimit);
+
+        // Nếu không có thẻ nào đến hạn, lấy ngẫu nhiên
+        if (flashcards.length === 0) {
+            flashcards = await Flashcard.aggregate([
+                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+                { $sample: { size: parsedLimit } }
+            ]);
+        }
 
         res.json({ flashcards });
     } catch (err) {
-        res.status(400).json({ error: err.message });
+        console.error("Lỗi khi lấy flashcards để review:", err);
+        res.status(500).json({ error: 'Đã xảy ra lỗi ở server khi lấy flashcards để review.' });
     }
 };
 
@@ -115,7 +135,7 @@ exports.getFlashcardStats = async (req, res) => {
         const userId = req.user.userId;
 
         const stats = await Flashcard.aggregate([
-            { $match: { userId: mongoose.Types.ObjectId(userId) } },
+            { $match: { userId: new mongoose.Types.ObjectId(userId) } },
             {
                 $group: {
                     _id: null,
@@ -131,7 +151,7 @@ exports.getFlashcardStats = async (req, res) => {
         ]);
 
         const dueForReview = await Flashcard.countDocuments({
-            userId: req.user.userId,
+            userId: new mongoose.Types.ObjectId(userId), // Đảm bảo có 'new' ở đây
             nextReview: { $lte: new Date() }
         });
 
@@ -150,7 +170,9 @@ exports.getFlashcardStats = async (req, res) => {
 
         res.json(result);
     } catch (err) {
-        res.status(400).json({ error: err.message });
+        // Log lỗi ra console để dễ debug
+        console.error("Lỗi khi lấy thống kê flashcard:", err);
+        res.status(500).json({ error: "Đã xảy ra lỗi ở server khi lấy thống kê." });
     }
 };
 
@@ -209,5 +231,3 @@ function calculateNextReviewInterval(difficulty, reviewCount, isCorrect) {
 
     return intervals[index];
 }
-
-const mongoose = require('mongoose'); 
