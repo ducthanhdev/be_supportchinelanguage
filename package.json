@@ -13,10 +13,12 @@
     "type": "commonjs",
     "dependencies": {
         "@vitalets/google-translate-api": "^9.2.1",
+        "bcryptjs": "^2.4.3",
         "body-parser": "^2.2.0",
         "cors": "^2.8.5",
         "dotenv": "^17.0.0",
         "express": "^5.1.0",
+        "jsonwebtoken": "^9.0.2",
         "mongoose": "^8.16.1",
         "node-fetch": "^3.3.2",
         "pinyin": "^4.0.0"

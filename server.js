@@ -16,10 +16,16 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // Import routes
+const authRoutes = require('./routes/auth.routes');
 const wordRoutes = require('./routes/word.routes');
 const hanvietRoutes = require('./routes/hanviet.routes');
 const exampleRoutes = require('./routes/example.routes');
 const translateRoutes = require('./routes/translate.routes');
+
+// Auth routes (không cần xác thực)
+app.use('/api/auth', authRoutes);
+
+// Protected routes (cần xác thực)
 app.use('/api/words', wordRoutes);
 app.use('/api/hanviet', hanvietRoutes);
 app.use('/api/example', exampleRoutes);

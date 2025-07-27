@@ -51,6 +51,7 @@ exports.createWord = async (req, res) => {
         }
 
         const word = new Word({
+            userId: req.user.userId,
             chinese,
             hanViet: finalHanViet,
             pinyin: finalPinyin,
@@ -69,8 +70,10 @@ exports.getWords = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const pageSize = parseInt(req.query.pageSize) || 10;
         const search = req.query.search || '';
+        const baseQuery = { userId: req.user.userId };
         const query = search
             ? {
+                ...baseQuery,
                 $or: [
                     { chinese: { $regex: search, $options: 'i' } },
                     { hanViet: { $regex: search, $options: 'i' } },
@@ -78,7 +81,7 @@ exports.getWords = async (req, res) => {
                     { vietnamese: { $regex: search, $options: 'i' } },
                 ],
             }
-            : {};
+            : baseQuery;
         const total = await Word.countDocuments(query);
         const words = await Word.find(query)
             .skip((page - 1) * pageSize)
@@ -109,7 +112,11 @@ exports.updateWord = async (req, res) => {
                 updateData.vietnamese = await translateToVietnamese(chinese);
             }
         }
-        const word = await Word.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        const word = await Word.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user.userId },
+            updateData,
+            { new: true }
+        );
         if (!word) return res.status(404).json({ error: 'Word not found' });
         res.json(word);
     } catch (err) {
@@ -120,7 +127,7 @@ exports.updateWord = async (req, res) => {
 // Xóa từ
 exports.deleteWord = async (req, res) => {
     try {
-        const word = await Word.findByIdAndDelete(req.params.id);
+        const word = await Word.findOneAndDelete({ _id: req.params.id, userId: req.user.userId });
         if (!word) return res.status(404).json({ error: 'Word not found' });
         res.json({ message: 'Deleted successfully' });
     } catch (err) {
