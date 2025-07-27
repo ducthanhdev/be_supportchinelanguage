@@ -21,6 +21,7 @@ const wordRoutes = require('./routes/word.routes');
 const hanvietRoutes = require('./routes/hanviet.routes');
 const exampleRoutes = require('./routes/example.routes');
 const translateRoutes = require('./routes/translate.routes');
+const flashcardRoutes = require('./routes/flashcard.routes');
 
 // Auth routes (không cần xác thực)
 app.use('/api/auth', authRoutes);
@@ -30,6 +31,7 @@ app.use('/api/words', wordRoutes);
 app.use('/api/hanviet', hanvietRoutes);
 app.use('/api/example', exampleRoutes);
 app.use('/api/translate', translateRoutes);
+app.use('/api/flashcards', flashcardRoutes);
 
 app.get('/', (req, res) => {
     res.send('Backend is running!');
