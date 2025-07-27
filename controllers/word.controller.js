@@ -3,7 +3,7 @@ const pinyinLib = require('pinyin');
 const getPinyin = pinyinLib.default || pinyinLib;
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const hanviet = require('../libs/hanviet');
-const translate = require('@vitalets/google-translate-api').default;
+const { translate } = require('@vitalets/google-translate-api');
 
 const LIBRE_API_KEY = process.env.LIBRE_API_KEY || '';
 
@@ -23,7 +23,9 @@ function getHanVietText(chinese) {
 // Hàm dịch tiếng Trung sang tiếng Việt
 async function translateToVietnamese(chinese) {
     try {
+        console.log('Đang dịch từ:', chinese);
         const result = await translate(chinese, { from: 'zh', to: 'vi' });
+        console.log('Kết quả dịch:', result);
         return result.text;
     } catch (error) {
         console.error('Lỗi dịch thuật:', error);
@@ -35,19 +37,30 @@ async function translateToVietnamese(chinese) {
 exports.createWord = async (req, res) => {
     try {
         const { chinese, hanViet, pinyin, vietnamese } = req.body;
+        console.log('Tạo từ mới:', { chinese, hanViet, pinyin, vietnamese });
+
         let finalPinyin = pinyin;
         let finalVietnamese = vietnamese;
         let finalHanViet = hanViet;
 
+        // Luôn tự động sinh pinyin nếu không có
         if (!finalPinyin) {
             finalPinyin = getPinyinText(chinese);
+            console.log('Sinh pinyin:', finalPinyin);
         }
-        if (!finalVietnamese) {
-            // Tự động dịch nghĩa tiếng Việt
+
+        // Luôn tự động dịch nghĩa tiếng Việt khi thêm từ mới
+        // Chỉ giữ lại nghĩa tiếng Việt nếu user đã nhập và không phải là giá trị mặc định
+        if (!finalVietnamese || finalVietnamese === 'Chưa có nghĩa' || finalVietnamese.trim() === '') {
+            console.log('Bắt đầu dịch nghĩa tiếng Việt...');
             finalVietnamese = await translateToVietnamese(chinese);
+            console.log('Kết quả dịch nghĩa:', finalVietnamese);
         }
+
+        // Luôn tự động sinh Hán Việt nếu không có
         if (!finalHanViet) {
             finalHanViet = getHanVietText(chinese);
+            console.log('Sinh Hán Việt:', finalHanViet);
         }
 
         const word = new Word({
@@ -58,8 +71,10 @@ exports.createWord = async (req, res) => {
             vietnamese: finalVietnamese,
         });
         await word.save();
+        console.log('Đã lưu từ:', word);
         res.status(201).json(word);
     } catch (err) {
+        console.error('Lỗi tạo từ:', err);
         res.status(400).json({ error: err.message });
     }
 };
