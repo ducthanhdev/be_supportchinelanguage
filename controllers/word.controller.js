@@ -3,6 +3,7 @@ const pinyinLib = require('pinyin');
 const getPinyin = pinyinLib.default || pinyinLib;
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const hanviet = require('../libs/hanviet');
+const translate = require('@vitalets/google-translate-api').default;
 
 const LIBRE_API_KEY = process.env.LIBRE_API_KEY || '';
 
@@ -19,7 +20,18 @@ function getHanVietText(chinese) {
     return chinese.split('').map(char => hanviet.data[char] || char).join(' ');
 }
 
-// Thêm từ mới (chỉ lấy nghĩa tiếng Việt do người dùng nhập)
+// Hàm dịch tiếng Trung sang tiếng Việt
+async function translateToVietnamese(chinese) {
+    try {
+        const result = await translate(chinese, { from: 'zh', to: 'vi' });
+        return result.text;
+    } catch (error) {
+        console.error('Lỗi dịch thuật:', error);
+        return 'Chưa có nghĩa';
+    }
+}
+
+// Thêm từ mới (tự động dịch nghĩa tiếng Việt)
 exports.createWord = async (req, res) => {
     try {
         const { chinese, hanViet, pinyin, vietnamese } = req.body;
@@ -31,7 +43,8 @@ exports.createWord = async (req, res) => {
             finalPinyin = getPinyinText(chinese);
         }
         if (!finalVietnamese) {
-            finalVietnamese = 'Chưa có nghĩa';
+            // Tự động dịch nghĩa tiếng Việt
+            finalVietnamese = await translateToVietnamese(chinese);
         }
         if (!finalHanViet) {
             finalHanViet = getHanVietText(chinese);
@@ -77,7 +90,7 @@ exports.getWords = async (req, res) => {
     }
 };
 
-// Sửa từ (chỉ lấy nghĩa tiếng Việt do người dùng nhập)
+// Sửa từ (tự động dịch nghĩa tiếng Việt khi cần)
 exports.updateWord = async (req, res) => {
     try {
         const { chinese, hanViet, pinyin, vietnamese } = req.body;
@@ -92,7 +105,8 @@ exports.updateWord = async (req, res) => {
                 updateData.pinyin = getPinyinText(chinese);
             }
             if (typeof vietnamese === 'undefined') {
-                updateData.vietnamese = 'Chưa có nghĩa';
+                // Tự động dịch nghĩa tiếng Việt
+                updateData.vietnamese = await translateToVietnamese(chinese);
             }
         }
         const word = await Word.findByIdAndUpdate(req.params.id, updateData, { new: true });

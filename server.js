@@ -19,9 +19,11 @@ app.use(bodyParser.json());
 const wordRoutes = require('./routes/word.routes');
 const hanvietRoutes = require('./routes/hanviet.routes');
 const exampleRoutes = require('./routes/example.routes');
+const translateRoutes = require('./routes/translate.routes');
 app.use('/api/words', wordRoutes);
 app.use('/api/hanviet', hanvietRoutes);
 app.use('/api/example', exampleRoutes);
+app.use('/api/translate', translateRoutes);
 
 app.get('/', (req, res) => {
     res.send('Backend is running!');
