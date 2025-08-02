@@ -6,6 +6,9 @@ const { authenticateToken } = require('../controllers/auth.controller');
 // Tất cả routes đều cần authentication
 router.use(authenticateToken);
 
+// Tạo flashcard từ word
+router.post('/create', flashcardController.createFlashcard);
+
 // Lấy flashcards cần review
 router.get('/review', flashcardController.getFlashcardsForReview);
 
