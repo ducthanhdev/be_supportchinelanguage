@@ -1,233 +1,163 @@
-const mongoose = require('mongoose');
-const Flashcard = require('../models/flashcard.model');
-const Word = require('../models/word.model');
+const mongoose = require("mongoose");
+const Flashcard = require("../models/flashcard.model");
+const Word = require("../models/word.model");
 
-// Tạo flashcard từ word
-exports.createFlashcard = async (req, res) => {
-    try {
-        const { wordId } = req.body;
-
-        // Kiểm tra word có tồn tại và thuộc về user không
-        const word = await Word.findOne({ _id: wordId, userId: req.user.userId });
-        if (!word) {
-            return res.status(404).json({ error: 'Word not found' });
-        }
-
-        // Kiểm tra flashcard đã tồn tại chưa
-        const existingFlashcard = await Flashcard.findOne({
-            userId: req.user.userId,
-            wordId: wordId
-        });
-
-        if (existingFlashcard) {
-            return res.status(400).json({ error: 'Flashcard already exists' });
-        }
-
-        const flashcard = new Flashcard({
-            userId: req.user.userId,
-            wordId: wordId,
-            chinese: word.chinese,
-            hanViet: word.hanViet,
-            pinyin: word.pinyin,
-            vietnamese: word.vietnamese
-        });
-
-        await flashcard.save();
-        res.status(201).json(flashcard);
-    } catch (err) {
-        res.status(400).json({ error: err.message });
-    }
-};
-
-// Lấy danh sách flashcards cần review
-exports.getFlashcardsForReview = async (req, res) => {
-    try {
-        const { limit = 10 } = req.query;
-        const userId = req.user.userId;
-        const parsedLimit = parseInt(limit, 10);
-
-        const totalCount = await Flashcard.countDocuments({ userId });
-
-        // Trường hợp không có thẻ nào
-        if (totalCount === 0) {
-            return res.json({ flashcards: [] });
-        }
-
-        // Nếu tổng số thẻ ít hơn limit, lấy tất cả
-        if (totalCount < parsedLimit) {
-            const allFlashcards = await Flashcard.find({ userId });
-            return res.json({ flashcards: allFlashcards });
-        }
-
-        // Ưu tiên lấy các thẻ đến hạn review
-        let flashcards = await Flashcard.find({
-            userId: userId,
-            nextReview: { $lte: new Date() }
-        })
-            .sort({ nextReview: 1 })
-            .limit(parsedLimit);
-
-        // Nếu không có thẻ nào đến hạn, lấy ngẫu nhiên
-        if (flashcards.length === 0) {
-            flashcards = await Flashcard.aggregate([
-                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-                { $sample: { size: parsedLimit } }
-            ]);
-        }
-
-        res.json({ flashcards });
-    } catch (err) {
-        console.error("Lỗi khi lấy flashcards để review:", err);
-        res.status(500).json({ error: 'Đã xảy ra lỗi ở server khi lấy flashcards để review.' });
-    }
-};
-
-// Cập nhật kết quả review
-exports.updateReviewResult = async (req, res) => {
-    try {
-        const { flashcardId, isCorrect } = req.body;
-
-        const flashcard = await Flashcard.findOne({
-            _id: flashcardId,
-            userId: req.user.userId
-        });
-
-        if (!flashcard) {
-            return res.status(404).json({ error: 'Flashcard not found' });
-        }
-
-        // Cập nhật thống kê
-        flashcard.reviewCount += 1;
-        if (isCorrect) {
-            flashcard.correctCount += 1;
-        }
-
-        // Tính toán độ khó dựa trên tỷ lệ đúng
-        const accuracy = flashcard.correctCount / flashcard.reviewCount;
-        if (accuracy >= 0.8) {
-            flashcard.difficulty = 'easy';
-        } else if (accuracy <= 0.4) {
-            flashcard.difficulty = 'hard';
-        } else {
-            flashcard.difficulty = 'medium';
-        }
-
-        // Tính thời gian review tiếp theo (Spaced Repetition)
-        const daysUntilNextReview = calculateNextReviewInterval(flashcard.difficulty, flashcard.reviewCount, isCorrect);
-        flashcard.nextReview = new Date(Date.now() + daysUntilNextReview * 24 * 60 * 60 * 1000);
-        flashcard.lastReviewed = new Date();
-
-        // Kiểm tra nếu đã mastered
-        if (flashcard.reviewCount >= 5 && accuracy >= 0.8) {
-            flashcard.isMastered = true;
-        }
-
-        await flashcard.save();
-        res.json(flashcard);
-    } catch (err) {
-        res.status(400).json({ error: err.message });
-    }
-};
-
-// Lấy thống kê flashcards
-exports.getFlashcardStats = async (req, res) => {
-    try {
-        const userId = req.user.userId;
-
-        const stats = await Flashcard.aggregate([
-            { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-            {
-                $group: {
-                    _id: null,
-                    total: { $sum: 1 },
-                    mastered: { $sum: { $cond: ['$isMastered', 1, 0] } },
-                    easy: { $sum: { $cond: [{ $eq: ['$difficulty', 'easy'] }, 1, 0] } },
-                    medium: { $sum: { $cond: [{ $eq: ['$difficulty', 'medium'] }, 1, 0] } },
-                    hard: { $sum: { $cond: [{ $eq: ['$difficulty', 'hard'] }, 1, 0] } },
-                    totalReviews: { $sum: '$reviewCount' },
-                    totalCorrect: { $sum: '$correctCount' }
-                }
-            }
-        ]);
-
-        const dueForReview = await Flashcard.countDocuments({
-            userId: new mongoose.Types.ObjectId(userId), // Đảm bảo có 'new' ở đây
-            nextReview: { $lte: new Date() }
-        });
-
-        const result = stats[0] || {
-            total: 0,
-            mastered: 0,
-            easy: 0,
-            medium: 0,
-            hard: 0,
-            totalReviews: 0,
-            totalCorrect: 0
-        };
-
-        result.dueForReview = dueForReview;
-        result.accuracy = result.totalReviews > 0 ? (result.totalCorrect / result.totalReviews * 100).toFixed(1) : 0;
-
-        res.json(result);
-    } catch (err) {
-        // Log lỗi ra console để dễ debug
-        console.error("Lỗi khi lấy thống kê flashcard:", err);
-        res.status(500).json({ error: "Đã xảy ra lỗi ở server khi lấy thống kê." });
-    }
-};
-
-// Tạo flashcards từ tất cả words của user
+// Hàm createFlashcardsFromWords giữ nguyên
 exports.createFlashcardsFromWords = async (req, res) => {
-    try {
-        const words = await Word.find({ userId: req.user.userId });
+  try {
+    const words = await Word.find({ userId: req.user.userId });
+    const flashcardsToCreate = [];
+    for (const word of words) {
+      const existingFlashcard = await Flashcard.findOne({
+        userId: req.user.userId,
+        wordId: word._id,
+      });
 
-        const flashcards = [];
-        for (const word of words) {
-            const existingFlashcard = await Flashcard.findOne({
-                userId: req.user.userId,
-                wordId: word._id
-            });
-
-            if (!existingFlashcard) {
-                const flashcard = new Flashcard({
-                    userId: req.user.userId,
-                    wordId: word._id,
-                    chinese: word.chinese,
-                    hanViet: word.hanViet,
-                    pinyin: word.pinyin,
-                    vietnamese: word.vietnamese
-                });
-                flashcards.push(flashcard);
-            }
-        }
-
-        if (flashcards.length > 0) {
-            await Flashcard.insertMany(flashcards);
-        }
-
-        res.json({
-            message: `Created ${flashcards.length} flashcards`,
-            created: flashcards.length
+      if (!existingFlashcard) {
+        flashcardsToCreate.push({
+          userId: req.user.userId,
+          wordId: word._id,
+          chinese: word.chinese,
+          hanViet: word.hanViet,
+          pinyin: word.pinyin,
+          vietnamese: word.vietnamese,
         });
-    } catch (err) {
-        res.status(400).json({ error: err.message });
+      }
     }
+
+    if (flashcardsToCreate.length > 0) {
+      await Flashcard.insertMany(flashcardsToCreate);
+    }
+
+    res.json({
+      message: `Created ${flashcardsToCreate.length} new flashcards`,
+      created: flashcardsToCreate.length,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 };
 
-// Hàm tính toán thời gian review tiếp theo
-function calculateNextReviewInterval(difficulty, reviewCount, isCorrect) {
-    if (!isCorrect) {
-        return 1; // Review lại ngay hôm sau nếu sai
+// Sửa lại hàm getFlashcardsForReview để đơn giản hơn
+exports.getFlashcardsForReview = async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    const userId = req.user.userId;
+
+    const flashcards = await Flashcard.find({
+      userId: userId,
+      dueDate: { $lte: new Date() }, // Chỉ lấy thẻ đã đến hạn hoặc quá hạn
+    })
+      .sort({ dueDate: 1 }) // Ưu tiên thẻ quá hạn lâu nhất
+      .limit(parseInt(limit, 10));
+
+    res.json({ flashcards });
+  } catch (err) {
+    console.error("Lỗi khi lấy flashcards để review:", err);
+    res.status(500).json({ error: "Đã xảy ra lỗi ở server." });
+  }
+};
+
+// --- HÀM MỚI: XỬ LÝ REVIEW VỚI THUẬT TOÁN SM-2 ---
+// Thay thế hoàn toàn cho updateReviewResult
+exports.reviewFlashcardWithSM2 = async (req, res) => {
+  try {
+    const { id } = req.params;
+    // `quality` là điểm người dùng tự đánh giá, từ 0 (quên hẳn) đến 5 (rất dễ)
+    const { quality } = req.body;
+
+    if (quality === undefined || quality < 0 || quality > 5) {
+      return res
+        .status(400)
+        .json({ error: "Quality score must be between 0 and 5." });
     }
 
-    const baseIntervals = {
-        easy: [1, 3, 7, 14, 30],
-        medium: [1, 2, 4, 7, 14],
-        hard: [1, 1, 2, 3, 7]
-    };
+    const flashcard = await Flashcard.findOne({
+      _id: id,
+      userId: req.user.userId,
+    });
 
-    const intervals = baseIntervals[difficulty] || baseIntervals.medium;
-    const index = Math.min(reviewCount - 1, intervals.length - 1);
+    if (!flashcard) {
+      return res.status(404).json({ error: "Flashcard not found" });
+    }
 
-    return intervals[index];
-}
+    // --- Logic thuật toán SM-2 ---
+    if (quality < 3) {
+      // Nếu trả lời sai (quality < 3), reset quá trình học
+      flashcard.repetition = 0;
+      flashcard.interval = 1; // Hẹn lại sau 1 ngày
+    } else {
+      // Nếu trả lời đúng (quality >= 3)
+      // 1. Cập nhật easinessFactor (hệ số dễ)
+      let newEasinessFactor =
+        flashcard.easinessFactor +
+        (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+      if (newEasinessFactor < 1.3) {
+        newEasinessFactor = 1.3; // Hệ số dễ không được thấp hơn 1.3
+      }
+      flashcard.easinessFactor = newEasinessFactor;
+
+      // 2. Tăng số lần lặp lại
+      flashcard.repetition += 1;
+
+      // 3. Tính toán interval mới
+      if (flashcard.repetition === 1) {
+        flashcard.interval = 1;
+      } else if (flashcard.repetition === 2) {
+        flashcard.interval = 6;
+      } else {
+        flashcard.interval = Math.round(
+          flashcard.interval * flashcard.easinessFactor
+        );
+      }
+    }
+
+    // 4. Cập nhật ngày review tiếp theo
+    const now = new Date();
+    flashcard.dueDate = new Date(
+      now.setDate(now.getDate() + flashcard.interval)
+    );
+
+    await flashcard.save();
+    res.json(flashcard);
+  } catch (err) {
+    console.error("Lỗi khi review flashcard:", err);
+    res.status(500).json({ error: "Đã xảy ra lỗi ở server." });
+  }
+};
+
+// Sửa lại hàm getFlashcardStats để phù hợp với model mới
+exports.getFlashcardStats = async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.userId);
+
+    const total = await Flashcard.countDocuments({ userId });
+
+    const dueForReview = await Flashcard.countDocuments({
+      userId: userId,
+      dueDate: { $lte: new Date() },
+    });
+
+    // Thống kê các thẻ đang học (chưa ôn lần nào hoặc interval < 21 ngày)
+    const learning = await Flashcard.countDocuments({
+      userId: userId,
+      interval: { $lt: 21 },
+    });
+
+    // Thống kê các thẻ đã trưởng thành (interval >= 21 ngày)
+    const mature = await Flashcard.countDocuments({
+      userId: userId,
+      interval: { $gte: 21 },
+    });
+
+    res.json({
+      total,
+      dueForReview,
+      learning,
+      mature,
+    });
+  } catch (err) {
+    console.error("Lỗi khi lấy thống kê flashcard:", err);
+    res.status(500).json({ error: "Đã xảy ra lỗi ở server." });
+  }
+};
