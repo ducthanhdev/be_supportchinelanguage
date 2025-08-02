@@ -34,7 +34,13 @@ const UserSchema = new mongoose.Schema({
     lastLogin: {
         type: Date,
         default: Date.now
-    }
+    },
+    // --- CÁC TRƯỜNG MỚI CHO TÍNH NĂNG STREAK ---
+    streak: {
+        current: { type: Number, default: 0 }, // Chuỗi hiện tại
+        longest: { type: Number, default: 0 }, // Chuỗi dài nhất
+        lastReviewedDate: { type: Date }, // Ngày cuối cùng ôn tập
+    },
 });
 
 // Hash password trước khi lưu
@@ -55,4 +61,4 @@ UserSchema.methods.comparePassword = async function (candidatePassword) {
     return bcrypt.compare(candidatePassword, this.password);
 };
 
-module.exports = mongoose.model('User', UserSchema); 
+module.exports = mongoose.model('User', UserSchema);

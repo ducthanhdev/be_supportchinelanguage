@@ -92,7 +92,6 @@ exports.getFlashcardsForReview = async (req, res) => {
 exports.reviewFlashcardWithSM2 = async (req, res) => {
     try {
         const { id } = req.params;
-        // `quality` là điểm người dùng tự đánh giá, từ 0 (quên hẳn) đến 5 (rất dễ)
         const { quality } = req.body; 
 
         if (quality === undefined || quality < 0 || quality > 5) {
@@ -108,24 +107,17 @@ exports.reviewFlashcardWithSM2 = async (req, res) => {
             return res.status(404).json({ error: 'Flashcard not found' });
         }
 
-        // --- Logic thuật toán SM-2 ---
+        // --- Logic thuật toán SM-2 (giữ nguyên) ---
         if (quality < 3) {
-            // Nếu trả lời sai (quality < 3), reset quá trình học
             flashcard.repetition = 0;
-            flashcard.interval = 1; // Hẹn lại sau 1 ngày
+            flashcard.interval = 1;
         } else {
-            // Nếu trả lời đúng (quality >= 3)
-            // 1. Cập nhật easinessFactor (hệ số dễ)
             let newEasinessFactor = flashcard.easinessFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
             if (newEasinessFactor < 1.3) {
-                newEasinessFactor = 1.3; // Hệ số dễ không được thấp hơn 1.3
+                newEasinessFactor = 1.3;
             }
             flashcard.easinessFactor = newEasinessFactor;
-
-            // 2. Tăng số lần lặp lại
             flashcard.repetition += 1;
-
-            // 3. Tính toán interval mới
             if (flashcard.repetition === 1) {
                 flashcard.interval = 1;
             } else if (flashcard.repetition === 2) {
@@ -134,14 +126,47 @@ exports.reviewFlashcardWithSM2 = async (req, res) => {
                 flashcard.interval = Math.round(flashcard.interval * flashcard.easinessFactor);
             }
         }
-
-        // 4. Cập nhật ngày review tiếp theo
         const now = new Date();
         const oneDayInMilliseconds = 24 * 60 * 60 * 1000;
         flashcard.dueDate = new Date(now.getTime() + flashcard.interval * oneDayInMilliseconds);
-
-
+        
         await flashcard.save();
+
+        // --- LOGIC CẬP NHẬT STREAK ---
+        const user = await User.findById(req.user.userId);
+        if (user) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Chuẩn hóa về đầu ngày
+
+            const lastReviewed = user.streak.lastReviewedDate;
+            if (lastReviewed) {
+                lastReviewed.setHours(0, 0, 0, 0);
+                const diffTime = today - lastReviewed;
+                const diffDays = Math.round(diffTime / oneDayInMilliseconds);
+
+                if (diffDays === 1) {
+                    // Tiếp tục chuỗi
+                    user.streak.current += 1;
+                } else if (diffDays > 1) {
+                    // Reset chuỗi
+                    user.streak.current = 1;
+                }
+                // Nếu diffDays là 0, không làm gì cả (đã ôn trong hôm nay)
+            } else {
+                // Lần đầu tiên ôn tập
+                user.streak.current = 1;
+            }
+            
+            // Cập nhật chuỗi dài nhất
+            if (user.streak.current > user.streak.longest) {
+                user.streak.longest = user.streak.current;
+            }
+            
+            user.streak.lastReviewedDate = new Date();
+            await user.save();
+        }
+        // --- KẾT THÚC LOGIC STREAK ---
+
         res.json(flashcard);
 
     } catch (err) {
